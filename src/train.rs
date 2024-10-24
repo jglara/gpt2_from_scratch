@@ -164,10 +164,7 @@ mod tests {
 
     }
 
-    #[test]
-    fn test_print() {
-        println!("test print");
-    }
+
 }
 
 
