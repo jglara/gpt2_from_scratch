@@ -4,30 +4,44 @@ use {
         prelude::*,
         tensor::activation,
     },
+    nn::{Linear, LinearConfig},
     rand::{distributions::WeightedIndex, prelude::*},
 };
 
 #[derive(Config, Debug)]
 pub struct BigramModelConfig {
     pub vocab_size: usize,
+    pub n_embd: usize,
+    pub block_size: usize,
 }
 
 #[derive(Debug, Module)]
 pub struct BigramModel<B: Backend> {
     token_embedding: Embedding<B>,
+    position_embedding: Embedding<B>,
+    lm_head: Linear<B>,
 }
 
 impl BigramModelConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> BigramModel<B> {
         BigramModel {
-            token_embedding: EmbeddingConfig::new(self.vocab_size, self.vocab_size).init(device),
+            token_embedding: EmbeddingConfig::new(self.vocab_size, self.n_embd).init(device),
+            position_embedding: EmbeddingConfig::new(self.block_size, self.n_embd).init(device),
+            lm_head: LinearConfig::new(self.n_embd, self.vocab_size).init(device),
         }
     }
 }
 
 impl<B: Backend> BigramModel<B> {
     pub fn forward(&self, input: Tensor<B, 2, Int>) -> Tensor<B, 3> {
-        let logits = self.token_embedding.forward(input.clone());
+        let [_, t] = input.dims();
+        let tok_emb = self.token_embedding.forward(input.clone());
+        let pos_emb = self
+            .position_embedding
+            .forward(Tensor::arange(0..(t as i64), &input.device()).unsqueeze());
+
+        let x = tok_emb + pos_emb;
+        let logits = self.lm_head.forward(x);
 
         logits
     }
@@ -53,8 +67,7 @@ impl<B: Backend> BigramModel<B> {
 
         for _ in 0..max_tokens {
             let logits = self.forward(
-                Tensor::<B, 1, Int>::from_data(TensorData::from(&toks[..]), &device).unsqueeze()
-                    ,
+                Tensor::<B, 1, Int>::from_data(TensorData::from(&toks[..]), &device).unsqueeze(),
             );
             // focus only on the last timestep
             let [b, t, c] = logits.dims();
@@ -101,6 +114,9 @@ mod tests {
 
         let bm = BigramModelConfig {
             vocab_size: tokenizer.vocab_size(),
+            n_embd: 32,
+            block_size: 64,
+            
         }
         .init::<NdArray>(&device);
         let logits = bm.forward(x);
@@ -116,6 +132,8 @@ mod tests {
 
         let bm = BigramModelConfig {
             vocab_size: tokenizer.vocab_size(),
+            n_embd: 32,
+            block_size: 64,
         }
         .init::<NdArray>(&Default::default());
         let generated = bm.generate(toks, 100);
@@ -128,25 +146,23 @@ mod tests {
         type MyBackend = Autodiff<NdArray>;
         let device = Default::default();
 
-        let (b,t,c) = (4,8,2);
+        let (b, t, c) = (4, 8, 2);
         let x = Tensor::<MyBackend, 2, Float>::random(
-            Shape::new([t,c]),
+            Shape::new([t, c]),
             burn::tensor::Distribution::Normal(0.0, 1.0),
             &device,
         );
 
         let mask = Tensor::<MyBackend, 2, Bool>::tril_mask([t, t], 0, &device);
         print!("mask: {:?}", mask);
-        let wei = Tensor::<MyBackend, 2>::zeros([t,t], &device);
+        let wei = Tensor::<MyBackend, 2>::zeros([t, t], &device);
         print!("wei: {:?}", wei);
         let wei = wei.mask_fill(mask, f32::NEG_INFINITY);
         print!("wei: {:?}", wei);
-        let wei = activation::softmax(wei,1);
+        let wei = activation::softmax(wei, 1);
         print!("wei: {:?}", wei);
 
         let x = wei.matmul(x);
         println!("x: {:?}", x);
-
-
     }
 }

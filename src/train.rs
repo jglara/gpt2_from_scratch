@@ -153,7 +153,7 @@ mod tests {
             block_size: 256,
             learning_rate: 3e-4,      
             optimizer: AdamWConfig::new(),      
-            model: BigramModelConfig { vocab_size: tokenizer.vocab_size() },
+            model: BigramModelConfig { vocab_size: tokenizer.vocab_size(), n_embd: 32, block_size: 256 },
         };
 
      
