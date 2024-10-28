@@ -4,7 +4,7 @@ use {
         prelude::*,
         tensor::activation,
     },
-    nn::{Linear, LinearConfig},
+    nn::{LayerNorm, LayerNormConfig, Linear, LinearConfig},
     rand::{distributions::WeightedIndex, prelude::*},
 };
 
@@ -247,7 +247,9 @@ pub struct BlockConfig {
 
 #[derive(Module, Debug)]
 pub struct Block<B: Backend> {
+    pub norm_1: LayerNorm<B>,
     pub attn: MultiHeadModel<B>,
+    pub norm_2: LayerNorm<B>,
     pub ffwd: PositionalFeedForwardModel<B>,
 }
 
@@ -257,7 +259,9 @@ impl BlockConfig {
         let head_size = self.n_embd / self.n_heads;
 
         Block {
+            norm_1: LayerNormConfig::new(self.n_embd).init(device),
             attn: MultiHeadModelConfig::new(self.n_embd, self.n_heads, head_size).init(device),
+            norm_2: LayerNormConfig::new(self.n_embd).init(device),
             ffwd: PositionalFeedForwardModelConfig::new(self.n_embd).init(device),
         }
     }
@@ -266,7 +270,9 @@ impl BlockConfig {
 
 impl<B: Backend> Block<B> {
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
-        let x = input.clone() + self.attn.forward(input);
+        let x = self.norm_1.forward(input.clone());
+        let x = x.clone() + self.attn.forward(x);
+        let x = self.norm_2.forward(x);
         let x = x.clone() + self.ffwd.forward(x);
         x
     }
