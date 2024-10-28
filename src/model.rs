@@ -21,6 +21,7 @@ pub struct BigramModel<B: Backend> {
     token_embedding: Embedding<B>,
     position_embedding: Embedding<B>,
     sa_heads: MultiHeadModel<B>,
+    pffwd: PositionalFeedForwardModel<B>,
     lm_head: Linear<B>,
 }
 
@@ -32,6 +33,7 @@ impl BigramModelConfig {
             token_embedding: EmbeddingConfig::new(self.vocab_size, self.n_embd).init(device),
             position_embedding: EmbeddingConfig::new(self.block_size, self.n_embd).init(device),
             sa_heads: MultiHeadModelConfig::new(self.n_heads, self.n_embd, head_size).init(device),
+            pffwd: PositionalFeedForwardModelConfig::new(self.n_embd).init(device),
             lm_head: LinearConfig::new(self.n_embd, self.vocab_size).init(device),
         }
     }
@@ -40,14 +42,15 @@ impl BigramModelConfig {
 impl<B: Backend> BigramModel<B> {
     pub fn forward(&self, input: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [_, t] = input.dims();
-        let tok_emb = self.token_embedding.forward(input.clone());
+        let tok_emb = self.token_embedding.forward(input.clone()); // [b,t,n_embd]
         let pos_emb = self
             .position_embedding
             .forward(Tensor::arange(0..(t as i64), &input.device()).unsqueeze());
 
-        let x = tok_emb + pos_emb;
-        let x = self.sa_heads.forward(x);
-        let logits = self.lm_head.forward(x);
+        let x = tok_emb + pos_emb; // [b,t,n_embd]
+        let x = self.sa_heads.forward(x); // [b,t,n_embd]
+        let x = self.pffwd.forward(x); // [b,t,n_embd]
+        let logits = self.lm_head.forward(x); // [b,t,vocab_size]
 
         logits
     }
@@ -161,6 +164,7 @@ pub struct MultiHeadModelConfig {
 #[derive(Debug, Module)]
 pub struct MultiHeadModel<B: Backend> {
     pub heads: Vec<SingleHeadModel<B>>,
+    pub proj: Linear<B>,
 }
 
 impl MultiHeadModelConfig {
@@ -169,6 +173,7 @@ impl MultiHeadModelConfig {
             heads: (0..self.n_heads)
                 .map(|_| SingleHeadModelConfig::new(self.n_embd, self.head_size).init(device))
                 .collect(),
+            proj: LinearConfig::new(self.n_embd, self.n_embd).init(device),
         }
     }
 }
@@ -183,10 +188,89 @@ impl<B: Backend> MultiHeadModel<B> {
                 .map(|h| h.forward(input.clone()))
                 .collect::<Vec<_>>();
             
-        Tensor::cat(outs, 2)        
+        let x = Tensor::cat(outs, 2);
+        let x = self.proj.forward(x);
+        x
+        
     }
 }
 
+
+///// Positional Feeed Forward Model
+///
+/// 
+#[derive(Config, Debug)]
+pub struct PositionalFeedForwardModelConfig {
+    pub n_embd: usize,
+}
+
+#[derive(Debug, Module)]
+pub struct PositionalFeedForwardModel<B: Backend> {
+    pub layer_1: Linear<B>,
+    pub layer_2: Linear<B>,
+}
+
+impl PositionalFeedForwardModelConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> PositionalFeedForwardModel<B> {
+        PositionalFeedForwardModel {
+            layer_1: LinearConfig::new(self.n_embd, 4 * self.n_embd)                
+                .init(device),
+            layer_2: LinearConfig::new(4 * self.n_embd, self.n_embd)                
+                .init(device),
+        }
+    }
+}
+
+
+impl <B: Backend> PositionalFeedForwardModel<B> {
+    pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
+        let x = self.layer_1.forward(input.clone());
+        let x = activation::relu(x);
+        let x = self.layer_2.forward(x);
+        let x = activation::relu(x);
+        x
+    }
+}
+
+
+
+/// Block Model
+/// 
+/// 
+
+#[derive(Config, Debug)]
+pub struct BlockConfig {
+    n_embd: usize,
+    n_heads: usize,
+}
+
+
+#[derive(Module, Debug)]
+pub struct Block<B: Backend> {
+    pub attn: MultiHeadModel<B>,
+    pub ffwd: PositionalFeedForwardModel<B>,
+}
+
+impl BlockConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Block<B> {
+        assert!(self.n_embd % self.n_heads == 0);  // n_embsd must be divisible by n_heads to MultiHeadModel
+        let head_size = self.n_embd / self.n_heads;
+
+        Block {
+            attn: MultiHeadModelConfig::new(self.n_embd, self.n_heads, head_size).init(device),
+            ffwd: PositionalFeedForwardModelConfig::new(self.n_embd).init(device),
+        }
+    }
+}
+
+
+impl<B: Backend> Block<B> {
+    pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
+        let x = input.clone() + self.attn.forward(input);
+        let x = x.clone() + self.ffwd.forward(x);
+        x
+    }
+}
 
 #[cfg(test)]
 mod tests {
