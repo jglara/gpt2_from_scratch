@@ -51,13 +51,11 @@ pub fn train<B: AutodiffBackend>(
     data_train: Tensor<B, 1, Int>,
     data_val: Tensor<B, 1, Int>,
 ) -> BigramModel<B> {
+    let device = data_train.device();
+    let mut model: BigramModel<B> = config.model.init(&device);
+    let mut optimizer = config.optimizer.init::<B, BigramModel<B>>();
 
-     let device = data_train.device();
-     let mut model: BigramModel<B> = config.model.init(&device);
-     let mut optimizer = config.optimizer.init::<B, BigramModel<B>>();
-
-     for i in 0..config.steps {
-
+    for i in 0..config.steps {
         // sample a batch
         let (x, y) = get_batch(data_train.clone(), config.batch_size, config.block_size);
 
@@ -70,17 +68,21 @@ pub fn train<B: AutodiffBackend>(
             let (x, y) = get_batch(data_val.clone(), config.batch_size, config.block_size);
             let logits = model.forward(x.clone());
             let val_loss = model.loss(logits.clone(), y.clone());
-            println!("step: {} val loss: {} loss: {:?}", i, val_loss.clone().into_scalar().elem::<f32>(), loss.clone().into_scalar().elem::<f32>());            
+            println!(
+                "step: {} val loss: {} loss: {:?}",
+                i,
+                val_loss.clone().into_scalar().elem::<f32>(),
+                loss.clone().into_scalar().elem::<f32>()
+            );
         }
 
         // backward pass
         let grads = loss.backward();
-        let grads= GradientsParams::from_grads(grads, &model);
+        let grads = GradientsParams::from_grads(grads, &model);
         model = optimizer.step(config.learning_rate, model, grads);
+    }
 
-     }
-
-     model
+    model
 }
 
 #[cfg(test)]
@@ -162,25 +164,24 @@ mod tests {
         let train_data = data.clone().slice([0..n - 1]);
         let test_data = data.clone().slice([n..total]);
 
-                
         let config = TrainingConfig {
             steps: 100,
             batch_size: 32,
             block_size: 256,
-            learning_rate: 3e-4,      
-            optimizer: AdamWConfig::new(),      
-            model: BigramModelConfig { vocab_size: tokenizer.vocab_size(), n_embd: 32, n_heads:4,block_size: 256 },
+            learning_rate: 3e-4,
+            optimizer: AdamWConfig::new(),
+            model: BigramModelConfig {
+                vocab_size: tokenizer.vocab_size(),
+                n_embd: 32,
+                n_heads: 4,
+                n_layers: 4,
+                block_size: 256,
+            },
         };
 
-     
-        let bm = train(&config,train_data, test_data);
+        let bm = train(&config, train_data, test_data);
         let generated = bm.generate(vec![0usize], 100);
 
         println!("generated: {:?}", tokenizer.decode(&generated));
-
     }
-
-
 }
-
-

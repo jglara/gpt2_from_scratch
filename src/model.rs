@@ -10,30 +10,32 @@ use {
 
 #[derive(Config, Debug)]
 pub struct BigramModelConfig {
-    pub vocab_size: usize,
-    pub n_embd: usize,
-    pub block_size: usize,
-    pub n_heads: usize,
+    pub vocab_size: usize, // number of tokens in the vocabulary
+    pub n_embd: usize,     // embedding dimension
+    pub block_size: usize, // number of tokens to use in each context
+    pub n_layers: usize,   // number of blocks / layers in the model
+    pub n_heads: usize,    // number of heads in each self attention block
 }
 
 #[derive(Debug, Module)]
 pub struct BigramModel<B: Backend> {
     token_embedding: Embedding<B>,
     position_embedding: Embedding<B>,
-    sa_heads: MultiHeadModel<B>,
-    pffwd: PositionalFeedForwardModel<B>,
+    blocks: Vec<Block<B>>,
+    norm: LayerNorm<B>,
     lm_head: Linear<B>,
 }
 
 impl BigramModelConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> BigramModel<B> {
-        assert!(self.n_embd % self.n_heads == 0);  // n_embsd must be divisible by n_heads to MultiHeadModel
-        let head_size = self.n_embd / self.n_heads;
+        
         BigramModel {
             token_embedding: EmbeddingConfig::new(self.vocab_size, self.n_embd).init(device),
             position_embedding: EmbeddingConfig::new(self.block_size, self.n_embd).init(device),
-            sa_heads: MultiHeadModelConfig::new(self.n_heads, self.n_embd, head_size).init(device),
-            pffwd: PositionalFeedForwardModelConfig::new(self.n_embd).init(device),
+            blocks: (0..self.n_layers)
+                .map(|_| BlockConfig::new(self.n_embd, self.n_heads).init(device))
+                .collect(),
+            norm: LayerNormConfig::new(self.n_embd).init(device),
             lm_head: LinearConfig::new(self.n_embd, self.vocab_size).init(device),
         }
     }
@@ -48,8 +50,8 @@ impl<B: Backend> BigramModel<B> {
             .forward(Tensor::arange(0..(t as i64), &input.device()).unsqueeze());
 
         let x = tok_emb + pos_emb; // [b,t,n_embd]
-        let x = self.sa_heads.forward(x); // [b,t,n_embd]
-        let x = self.pffwd.forward(x); // [b,t,n_embd]
+        let x = self.blocks.iter().fold(x, |x, b| b.forward(x)); // [b,t,n_embd]
+        let x = self.norm.forward(x); // [b,t,n_embd]
         let logits = self.lm_head.forward(x); // [b,t,vocab_size]
 
         logits
@@ -260,7 +262,7 @@ impl BlockConfig {
 
         Block {
             norm_1: LayerNormConfig::new(self.n_embd).init(device),
-            attn: MultiHeadModelConfig::new(self.n_embd, self.n_heads, head_size).init(device),
+            attn: MultiHeadModelConfig::new(self.n_heads, self.n_embd, head_size).init(device),
             norm_2: LayerNormConfig::new(self.n_embd).init(device),
             ffwd: PositionalFeedForwardModelConfig::new(self.n_embd).init(device),
         }
@@ -309,6 +311,7 @@ mod tests {
             vocab_size: tokenizer.vocab_size(),
             n_embd: 32,
             n_heads: 4,
+            n_layers: 4,
             block_size: 64,
         }
         .init::<NdArray>(&device);
@@ -327,6 +330,7 @@ mod tests {
             vocab_size: tokenizer.vocab_size(),
             n_embd: 32,
             n_heads: 4,
+            n_layers: 4,
             block_size: 64,
         }
         .init::<NdArray>(&Default::default());
