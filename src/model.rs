@@ -13,12 +13,14 @@ pub struct BigramModelConfig {
     pub vocab_size: usize,
     pub n_embd: usize,
     pub block_size: usize,
+    
 }
 
 #[derive(Debug, Module)]
 pub struct BigramModel<B: Backend> {
     token_embedding: Embedding<B>,
     position_embedding: Embedding<B>,
+    sa_head: SingleHeadModel<B>,
     lm_head: Linear<B>,
 }
 
@@ -27,6 +29,7 @@ impl BigramModelConfig {
         BigramModel {
             token_embedding: EmbeddingConfig::new(self.vocab_size, self.n_embd).init(device),
             position_embedding: EmbeddingConfig::new(self.block_size, self.n_embd).init(device),
+            sa_head: SingleHeadModelConfig::new(self.n_embd, self.n_embd).init(device),
             lm_head: LinearConfig::new(self.n_embd, self.vocab_size).init(device),
         }
     }
@@ -41,6 +44,7 @@ impl<B: Backend> BigramModel<B> {
             .forward(Tensor::arange(0..(t as i64), &input.device()).unsqueeze());
 
         let x = tok_emb + pos_emb;
+        let x = self.sa_head.forward(x);
         let logits = self.lm_head.forward(x);
 
         logits
@@ -84,6 +88,64 @@ impl<B: Backend> BigramModel<B> {
         toks
     }
 }
+
+///// Single Head Attention Model
+/// 
+
+
+#[derive(Config, Debug)]
+pub struct SingleHeadModelConfig {
+    pub n_embd: usize,
+    pub head_size: usize,
+ 
+}
+
+#[derive(Debug, Module)]
+pub struct SingleHeadModel<B: Backend> {
+       pub key: Linear<B>,
+       pub query: Linear<B>,
+       pub value: Linear<B>,
+}
+
+impl<B: Backend> SingleHeadModel<B> {
+    pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
+        let [_b,t,c] = input.dims();
+        let k = self.key.forward(input.clone());    // [b,t,head_size]
+        let q = self.query.forward(input.clone());  // [b,t,head_size]
+
+        let wei = q.matmul(k.transpose()); // [b,t,head_size] @ [b,head_size,t] = [b,t,t]
+        let wei = wei.div_scalar((c as f32).sqrt()); // normalize to keep variance and make softmax later work better
+
+        // triangular mask to avoid looking ahead
+        // [[1, 0, 0], 
+        //  [1, 1, 0],
+        //  [1, 1, 1]]
+
+        let mask = Tensor::<B, 2, Bool>::tril_mask([t, t], 0, &input.device()).unsqueeze(); // [1,t,t]
+        let wei = wei.mask_fill(mask, f32::NEG_INFINITY);
+        
+        let wei = activation::softmax(wei, 2);
+        let v = self.value.forward(input.clone()); // [b,t,head_size]
+        
+        let out = wei.matmul(v); // [b,t,t] @ [b,t,head_size] = [b,t,head_size]
+        out
+
+
+    }
+}
+
+
+impl SingleHeadModelConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> SingleHeadModel<B> {
+        SingleHeadModel {
+            key: LinearConfig::new(self.n_embd, self.head_size).with_bias(false).init(device),
+            query: LinearConfig::new(self.n_embd, self.head_size).with_bias(false).init(device),
+            value: LinearConfig::new(self.n_embd, self.head_size).with_bias(false).init(device),
+        }
+    }
+}
+
+         
 
 #[cfg(test)]
 mod tests {
@@ -146,7 +208,7 @@ mod tests {
         type MyBackend = Autodiff<NdArray>;
         let device = Default::default();
 
-        let (b, t, c) = (4, 8, 2);
+        let (_b, t, c) = (4, 8, 32);
         let x = Tensor::<MyBackend, 2, Float>::random(
             Shape::new([t, c]),
             burn::tensor::Distribution::Normal(0.0, 1.0),

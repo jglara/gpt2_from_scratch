@@ -55,7 +55,7 @@ pub fn train<B: AutodiffBackend>(
      let mut model: BigramModel<B> = config.model.init(&device);
      let mut optimizer = config.optimizer.init::<B, BigramModel<B>>();
 
-     for _ in 0..config.epochs {
+     for i in 0..config.epochs {
         // sample a batch
         let (x, y) = get_batch(data_train.clone(), config.batch_size, config.block_size);
 
@@ -63,7 +63,7 @@ pub fn train<B: AutodiffBackend>(
         let logits = model.forward(x.clone());
         let loss = model.loss(logits.clone(), y.clone());
 
-        println!("loss: {:?}", loss.clone().into_scalar().elem::<f32>());
+        println!("epoch: {} loss: {:?}", i, loss.clone().into_scalar().elem::<f32>());
 
         // backward pass
         let grads = loss.backward();
