@@ -4,7 +4,7 @@ use {
         prelude::*,
         tensor::activation,
     },
-    nn::{LayerNorm, LayerNormConfig, Linear, LinearConfig},
+    nn::{Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig},
     rand::{distributions::WeightedIndex, prelude::*},
 };
 
@@ -103,12 +103,15 @@ impl<B: Backend> BigramModel<B> {
 pub struct SingleHeadModelConfig {
     pub n_embd: usize,
     pub head_size: usize,
+    #[config(default = 0.2)]
+    pub dropout: f64,
 }
 
 #[derive(Debug, Module)]
 pub struct SingleHeadModel<B: Backend> {
     pub key: Linear<B>,
     pub query: Linear<B>,
+    pub dropout: Dropout,
     pub value: Linear<B>,
 }
 
@@ -130,6 +133,7 @@ impl<B: Backend> SingleHeadModel<B> {
         let wei = wei.mask_fill(mask, f32::NEG_INFINITY);
 
         let wei = activation::softmax(wei, 2);
+        let wei = self.dropout.forward(wei);
         let v = self.value.forward(input.clone()); // [b,t,head_size]
 
         let out = wei.matmul(v); // [b,t,t] @ [b,t,head_size] = [b,t,head_size]
@@ -146,6 +150,7 @@ impl SingleHeadModelConfig {
             query: LinearConfig::new(self.n_embd, self.head_size)
                 .with_bias(false)
                 .init(device),
+            dropout: DropoutConfig::new(self.dropout).init(),
             value: LinearConfig::new(self.n_embd, self.head_size)
                 .with_bias(false)
                 .init(device),
@@ -161,12 +166,15 @@ pub struct MultiHeadModelConfig {
     pub n_heads: usize,
     pub n_embd: usize,
     pub head_size: usize,
+    #[config(default = 0.2)]
+    pub dropout: f64,
 }
 
 #[derive(Debug, Module)]
 pub struct MultiHeadModel<B: Backend> {
     pub heads: Vec<SingleHeadModel<B>>,
     pub proj: Linear<B>,
+    pub dropout: Dropout,
 }
 
 impl MultiHeadModelConfig {
@@ -176,6 +184,7 @@ impl MultiHeadModelConfig {
                 .map(|_| SingleHeadModelConfig::new(self.n_embd, self.head_size).init(device))
                 .collect(),
             proj: LinearConfig::new(self.n_embd, self.n_embd).init(device),
+            dropout: DropoutConfig::new(self.dropout).init(),
         }
     }
 }
