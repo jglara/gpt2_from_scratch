@@ -96,6 +96,7 @@ impl<B: Backend> BigramModel<B> {
     }
 }
 
+
 ///// Single Head Attention Model
 ///
 
@@ -304,6 +305,8 @@ mod tests {
 
     #[test]
     fn bigram_model_test() {
+        //type MyBackend = Autodiff<NdArray>;
+
         let tokenizer = CharTokenizer::new();
         let data = tokenizer.encode(
             std::fs::read_to_string("./gpt2_data/shakespeare.txt")
