@@ -1,4 +1,4 @@
-use crate::model::{BigramModel, BigramModelConfig};
+use crate::model::{GPTModel, GPTModelConfig};
 use burn::optim::{AdamWConfig, GradientsParams, Optimizer};
 use burn::tensor::{backend::Backend, Int, Tensor};
 use burn::{prelude::*, tensor::backend::AutodiffBackend};
@@ -43,17 +43,17 @@ pub struct TrainingConfig {
     #[config(default = 0.003)]
     pub learning_rate: f64,
     pub optimizer: AdamWConfig,
-    pub model: BigramModelConfig,
+    pub model: GPTModelConfig,
 }
 
 pub fn train<B: AutodiffBackend>(
     config: &TrainingConfig,
     data_train: Tensor<B, 1, Int>,
     data_val: Tensor<B, 1, Int>,
-) -> BigramModel<B> {
+) -> GPTModel<B> {
     let device = data_train.device();
-    let mut model: BigramModel<B> = config.model.init(&device);
-    let mut optimizer = config.optimizer.init::<B, BigramModel<B>>();
+    let mut model: GPTModel<B> = config.model.init(&device);
+    let mut optimizer = config.optimizer.init::<B, GPTModel<B>>();
 
     for i in 0..config.steps {
         // sample a batch
@@ -170,7 +170,7 @@ mod tests {
             block_size: 256,
             learning_rate: 3e-4,
             optimizer: AdamWConfig::new(),
-            model: BigramModelConfig {
+            model: GPTModelConfig {
                 vocab_size: tokenizer.vocab_size(),
                 n_embd: 32,
                 n_heads: 4,

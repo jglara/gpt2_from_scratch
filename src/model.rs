@@ -4,12 +4,15 @@ use {
         prelude::*,
         tensor::activation,
     },
-    nn::{Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig},
+    nn::{
+        Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
+        Relu,
+    },
     rand::{distributions::WeightedIndex, prelude::*},
 };
 
 #[derive(Config, Debug)]
-pub struct BigramModelConfig {
+pub struct GPTModelConfig {
     pub vocab_size: usize, // number of tokens in the vocabulary
     pub n_embd: usize,     // embedding dimension
     pub block_size: usize, // number of tokens to use in each context
@@ -18,7 +21,7 @@ pub struct BigramModelConfig {
 }
 
 #[derive(Debug, Module)]
-pub struct BigramModel<B: Backend> {
+pub struct GPTModel<B: Backend> {
     token_embedding: Embedding<B>,
     position_embedding: Embedding<B>,
     blocks: Vec<Block<B>>,
@@ -26,10 +29,9 @@ pub struct BigramModel<B: Backend> {
     lm_head: Linear<B>,
 }
 
-impl BigramModelConfig {
-    pub fn init<B: Backend>(&self, device: &B::Device) -> BigramModel<B> {
-        
-        BigramModel {
+impl GPTModelConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> GPTModel<B> {
+        GPTModel {
             token_embedding: EmbeddingConfig::new(self.vocab_size, self.n_embd).init(device),
             position_embedding: EmbeddingConfig::new(self.block_size, self.n_embd).init(device),
             blocks: (0..self.n_layers)
@@ -41,7 +43,7 @@ impl BigramModelConfig {
     }
 }
 
-impl<B: Backend> BigramModel<B> {
+impl<B: Backend> GPTModel<B> {
     pub fn forward(&self, input: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [_, t] = input.dims();
         let tok_emb = self.token_embedding.forward(input.clone()); // [b,t,n_embd]
@@ -96,7 +98,6 @@ impl<B: Backend> BigramModel<B> {
     }
 }
 
-
 ///// Single Head Attention Model
 ///
 
@@ -104,15 +105,13 @@ impl<B: Backend> BigramModel<B> {
 pub struct SingleHeadModelConfig {
     pub n_embd: usize,
     pub head_size: usize,
-    #[config(default = 0.2)]
-    pub dropout: f64,
+
 }
 
 #[derive(Debug, Module)]
 pub struct SingleHeadModel<B: Backend> {
     pub key: Linear<B>,
     pub query: Linear<B>,
-    pub dropout: Dropout,
     pub value: Linear<B>,
 }
 
@@ -134,7 +133,6 @@ impl<B: Backend> SingleHeadModel<B> {
         let wei = wei.mask_fill(mask, f32::NEG_INFINITY);
 
         let wei = activation::softmax(wei, 2);
-        let wei = self.dropout.forward(wei);
         let v = self.value.forward(input.clone()); // [b,t,head_size]
 
         let out = wei.matmul(v); // [b,t,t] @ [b,t,head_size] = [b,t,head_size]
@@ -151,7 +149,6 @@ impl SingleHeadModelConfig {
             query: LinearConfig::new(self.n_embd, self.head_size)
                 .with_bias(false)
                 .init(device),
-            dropout: DropoutConfig::new(self.dropout).init(),
             value: LinearConfig::new(self.n_embd, self.head_size)
                 .with_bias(false)
                 .init(device),
@@ -192,70 +189,67 @@ impl MultiHeadModelConfig {
 
 impl<B: Backend> MultiHeadModel<B> {
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
-
         // Run n_heads single head models in parallel
-        let outs = 
-            self.heads
-                .iter()
-                .map(|h| h.forward(input.clone()))
-                .collect::<Vec<_>>();
-            
+        let outs = self
+            .heads
+            .iter()
+            .map(|h| h.forward(input.clone()))
+            .collect::<Vec<_>>();
+
         let x = Tensor::cat(outs, 2);
         let x = self.proj.forward(x);
         x
-        
     }
 }
 
-
 ///// Positional Feeed Forward Model
 ///
-/// 
+///
 #[derive(Config, Debug)]
 pub struct PositionalFeedForwardModelConfig {
     pub n_embd: usize,
+    #[config(default = 0.2)]
+    pub dropout: f64,
 }
 
 #[derive(Debug, Module)]
 pub struct PositionalFeedForwardModel<B: Backend> {
     pub layer_1: Linear<B>,
+    pub act_1: Relu,
     pub layer_2: Linear<B>,
+    pub dropout: Dropout,
 }
 
 impl PositionalFeedForwardModelConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> PositionalFeedForwardModel<B> {
         PositionalFeedForwardModel {
-            layer_1: LinearConfig::new(self.n_embd, 4 * self.n_embd)                
-                .init(device),
-            layer_2: LinearConfig::new(4 * self.n_embd, self.n_embd)                
-                .init(device),
+            layer_1: LinearConfig::new(self.n_embd, 4 * self.n_embd).init(device),
+            act_1: Relu::new(),
+            layer_2: LinearConfig::new(4 * self.n_embd, self.n_embd).init(device),
+            dropout: DropoutConfig::new(self.dropout).init(),
         }
     }
 }
 
-
-impl <B: Backend> PositionalFeedForwardModel<B> {
+impl<B: Backend> PositionalFeedForwardModel<B> {
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
         let x = self.layer_1.forward(input.clone());
-        let x = activation::relu(x);
+        let x = self.act_1.forward(x);
         let x = self.layer_2.forward(x);
-        let x = activation::relu(x);
+        let x = self.dropout.forward(x);
         x
     }
 }
 
-
-
 /// Block Model
-/// 
-/// 
+///
+///
 
 #[derive(Config, Debug)]
 pub struct BlockConfig {
     n_embd: usize,
     n_heads: usize,
 }
-
 
 #[derive(Module, Debug)]
 pub struct Block<B: Backend> {
@@ -267,7 +261,7 @@ pub struct Block<B: Backend> {
 
 impl BlockConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> Block<B> {
-        assert!(self.n_embd % self.n_heads == 0);  // n_embsd must be divisible by n_heads to MultiHeadModel
+        assert!(self.n_embd % self.n_heads == 0); // n_embsd must be divisible by n_heads to MultiHeadModel
         let head_size = self.n_embd / self.n_heads;
 
         Block {
@@ -278,7 +272,6 @@ impl BlockConfig {
         }
     }
 }
-
 
 impl<B: Backend> Block<B> {
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
@@ -319,7 +312,7 @@ mod tests {
 
         let (x, y) = get_batch(data, 10, 8);
 
-        let bm = BigramModelConfig {
+        let bm = GPTModelConfig {
             vocab_size: tokenizer.vocab_size(),
             n_embd: 32,
             n_heads: 4,
@@ -338,7 +331,7 @@ mod tests {
         let tokenizer = CharTokenizer::new();
         let toks = vec![0usize];
 
-        let bm = BigramModelConfig {
+        let bm = GPTModelConfig {
             vocab_size: tokenizer.vocab_size(),
             n_embd: 32,
             n_heads: 4,

@@ -1,5 +1,5 @@
 use crate::data::{LLMDataItem, LLMDataSetBatch, LLMDataset, LLMDatasetBatcher};
-use crate::model::{BigramModel, BigramModelConfig};
+use crate::model::{GPTModel, GPTModelConfig};
 use crate::tokenizer::CharTokenizer;
 use burn::data::dataloader::DataLoaderBuilder;
 use burn::data::dataset::transform::{PartialDataset, ShuffledDataset};
@@ -20,7 +20,7 @@ pub struct TrainingConfig {
     #[config(default = 0.003)]
     pub learning_rate: f64,
     pub optimizer: AdamWConfig,
-    pub model: BigramModelConfig,
+    pub model: GPTModelConfig,
 
     #[config(default = 42)]
     pub seed: u64,
@@ -32,7 +32,7 @@ fn create_artifact_dir(artifact_dir: &str) {
     std::fs::create_dir_all(artifact_dir).ok();
 }
 
-impl<B: AutodiffBackend> TrainStep<LLMDataSetBatch<B>, ClassificationOutput<B>> for BigramModel<B> {
+impl<B: AutodiffBackend> TrainStep<LLMDataSetBatch<B>, ClassificationOutput<B>> for GPTModel<B> {
     fn step(&self, batch: LLMDataSetBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
         let logits = self.forward(batch.data);
         let loss = self.loss(logits.clone(), batch.target.clone());
@@ -48,7 +48,7 @@ impl<B: AutodiffBackend> TrainStep<LLMDataSetBatch<B>, ClassificationOutput<B>> 
     }
 }
 
-impl<B: Backend> ValidStep<LLMDataSetBatch<B>, ClassificationOutput<B>> for BigramModel<B> {
+impl<B: Backend> ValidStep<LLMDataSetBatch<B>, ClassificationOutput<B>> for GPTModel<B> {
     fn step(&self, batch: LLMDataSetBatch<B>) -> ClassificationOutput<B> {
         let logits = self.forward(batch.data);
         let loss = self.loss(logits.clone(), batch.target.clone());
@@ -69,7 +69,7 @@ pub fn train<B: AutodiffBackend>(
     config: &TrainingConfig,
     input_file: &str,
     device: B::Device,
-) -> BigramModel<B> {
+) -> GPTModel<B> {
     create_artifact_dir(artifact_dir);
     config
         .save(format!("{artifact_dir}/config.json"))
