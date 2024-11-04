@@ -9,7 +9,7 @@ use gpt2_from_scratch::learner::TrainingConfig;
 use gpt2_from_scratch::model::{GPTModel, GPTModelConfig};
 use gpt2_from_scratch::tokenizer::{CharTokenizer, Tokenizer};
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 
 #[derive(Parser)]
 struct Cli {
@@ -20,7 +20,9 @@ struct Cli {
     train: bool,
 
     #[arg(short, long)]
-    generate: bool,
+    out: String,
+
+    
 }
 
 fn main() {
@@ -49,12 +51,12 @@ fn main() {
         let device = WgpuDevice::default();
 
         let bm: GPTModel<_> = if cli.train {
-            train::<MyBackend>("./models", &config, "./gpt2_data/shakespeare.txt", device)
+            train::<MyBackend>(&format!("{}", cli.out), &config, "./gpt2_data/shakespeare.txt", device)
         } else {
             config
                 .model
                 .init(&device)
-                .load_file("./models/model", &CompactRecorder::new(), &device)
+                .load_file(&format!("{}/model", cli.out), &CompactRecorder::new(), &device)
                 .expect("File not found")
         };
 
@@ -70,15 +72,15 @@ fn main() {
         let device = NdArrayDevice::default();
 
         let bm: GPTModel<_> = if cli.train {
-            train::<MyBackend>("./models", &config, "./gpt2_data/shakespeare.txt", device)
+            train::<MyBackend>(&format!("{}", cli.out), &config, "./gpt2_data/shakespeare.txt", device)
         } else {
             config
                 .model
                 .init(&device)
-                .load_file("./models/model", &CompactRecorder::new(), &device)
+                .load_file(&format!("{}/model", cli.out), &CompactRecorder::new(), &device)
                 .expect("File not found")
         };
-
+        
         let generated = bm.generate(vec![0usize], 100);
 
         tokenizer
