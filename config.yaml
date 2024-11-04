@@ -1,0 +1,7 @@
+steps: 1000
+batch_size: 64
+n_ctxt: 256
+learning_rate: 0.0003
+n_embd: 384
+n_heads: 6
+n_layers: 6
