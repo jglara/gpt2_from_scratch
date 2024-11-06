@@ -1,18 +1,15 @@
 use std::collections::HashMap;
 
-
 pub trait Tokenizer {
     fn encode(&self, text: &str) -> Vec<usize>;
     fn decode(&self, tokens: &[usize]) -> String;
     fn vocab_size(&self) -> usize;
 }
 
-
 pub struct CharTokenizer {
     vocab: HashMap<usize, char>,
-    reversed_vocab: HashMap<char, usize>,    
+    reversed_vocab: HashMap<char, usize>,
 }
-
 
 impl CharTokenizer {
     pub fn new() -> Self {
@@ -25,24 +22,28 @@ impl CharTokenizer {
             reversed_vocab.insert(c, i);
         });
 
-        Self { vocab, reversed_vocab }        
+        Self {
+            vocab,
+            reversed_vocab,
+        }
     }
 }
 
 impl Tokenizer for CharTokenizer {
     fn encode(&self, text: &str) -> Vec<usize> {
-        text.chars().map(|c| self.reversed_vocab[&c]).collect()
+        text.chars()
+            .filter_map(|c| self.reversed_vocab.get(&c).map(|c| *c))
+            .collect()
     }
-    
+
     fn decode(&self, tokens: &[usize]) -> String {
         tokens.iter().map(|&i| self.vocab[&i]).collect()
     }
-    
+
     fn vocab_size(&self) -> usize {
         self.vocab.len()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -54,14 +55,12 @@ mod tests {
         let s = "hii there";
         let v: Vec<usize> = tokenizer.encode(s);
         assert_eq!(s, tokenizer.decode(&v));
-
     }
-
 
     #[test]
     fn test_char_tokenizer_vocab_size() {
         let tokenizer = CharTokenizer::new();
-        assert_eq!(tokenizer.vocab_size(),103);
+        assert_eq!(tokenizer.vocab_size(), 103);
     }
 
     #[test]
@@ -74,6 +73,4 @@ mod tests {
         println!("{:?}", &tokens[0..100]);
         assert_eq!(tokens.len(), input.len());
     }
-
-
 }

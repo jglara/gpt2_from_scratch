@@ -19,16 +19,16 @@ struct Cli {
     gpu: bool,
 
     #[arg(short, long)]
-    train: bool,
+    train: Option<String>,
 
     #[arg(short, long)]
-    out: String,
+    model: String,
 
     #[arg(long)]
     config: String,
 
     #[arg(long)]
-    generate: usize,
+    generate: Option<usize>,
 }
 
 #[config]
@@ -69,59 +69,53 @@ fn main() -> Result<()> {
         type MyBackend = Autodiff<Wgpu>;
         let device = WgpuDevice::default();
 
-        let bm: GPTModel<_> = if cli.train {
+        let bm: GPTModel<_> = if cli.train.is_some() {
             train::<MyBackend>(
-                &format!("{}", cli.out),
+                &format!("{}", cli.model),
                 &train_config,
-                "./gpt2_data/shakespeare.txt",
-                device,
+                &cli.train.unwrap(),
+                device.clone(),
             )
         } else {
-            train_config
-                .model
-                .init(&device)
-                .load_file(
-                    &format!("{}/model", cli.out),
-                    &CompactRecorder::new(),
-                    &device,
-                )?
+            train_config.model.init(&device).load_file(
+                &format!("{}/model", cli.model),
+                &CompactRecorder::new(),
+                &device,
+            )?
         };
 
-        let generated = bm.generate(vec![0usize], cli.generate);
+        if let Some(generate) = cli.generate {
+          
+                let _generated = bm.generate(vec![0usize], 32, generate, &tokenizer);
 
-        tokenizer
-            .decode(&generated)
-            .lines()
-            .for_each(|l| println!("{}", l));
+               
+           
+           
+        }
     } else {
         type MyBackend = Autodiff<NdArray>;
         let device = NdArrayDevice::default();
 
-        let bm: GPTModel<_> = if cli.train {
+        let bm: GPTModel<_> = if cli.train.is_some() {
             train::<MyBackend>(
-                &format!("{}", cli.out),
+                &format!("{}", cli.model),
                 &train_config,
-                "./gpt2_data/shakespeare.txt",
+                &cli.train.unwrap(),
                 device,
             )
         } else {
-            train_config
-                .model
-                .init(&device)
-                .load_file(
-                    &format!("{}/model", cli.out),
-                    &CompactRecorder::new(),
-                    &device,
-                )?
-                
+            train_config.model.init(&device).load_file(
+                &format!("{}/model", cli.model),
+                &CompactRecorder::new(),
+                &device,
+            )?
         };
 
-        let generated = bm.generate(vec![0usize], cli.generate);
+        if let Some(generate) = cli.generate {
+            let _generated = bm.generate(vec![0usize], 32, generate, &tokenizer);
 
-        tokenizer
-            .decode(&generated)
-            .lines()
-            .for_each(|l| println!("{}", l));
+         
+        }
     }
 
     Ok(())

@@ -1,14 +1,9 @@
 use {
-    burn::{
+    crate::tokenizer::Tokenizer, burn::{
         nn::{loss::CrossEntropyLossConfig, Embedding, EmbeddingConfig},
         prelude::*,
         tensor::activation,
-    },
-    nn::{
-        Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
-        Relu,
-    },
-    rand::{distributions::WeightedIndex, prelude::*},
+    }, nn::{Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig, Relu}, rand::{distributions::WeightedIndex, prelude::*}, std::io::{self, Write}
 };
 
 #[derive(Config, Debug)]
@@ -72,27 +67,49 @@ impl<B: Backend> GPTModel<B> {
         loss
     }
 
-    pub fn generate(&self, context: Vec<usize>, max_tokens: usize) -> Vec<usize> {
+    pub fn generate(
+        &self,
+        context: Vec<usize>,
+        context_length: usize,
+        max_tokens: usize,
+        tokenizer: &impl Tokenizer,
+    ) -> Vec<usize> {
         let mut rng = StdRng::seed_from_u64(42);
         let device = B::Device::default();
 
         let mut toks = context.clone();
 
         for _ in 0..max_tokens {
+            
+       
+            let input =
+                &toks[std::cmp::max(0, toks.len() as isize - context_length as isize) as usize..];
+            
+            
             let logits = self.forward(
-                Tensor::<B, 1, Int>::from_data(TensorData::from(&toks[..]), &device).unsqueeze(),
+                Tensor::<B, 1, Int>::from_data(TensorData::from(input), &device).unsqueeze(),
             );
+            
             // focus only on the last timestep
             let [b, t, c] = logits.dims();
 
+            
             let slice = logits.slice([0..b, t - 1..t, 0..c]).flatten::<1>(0, 2);
             let probs: Vec<f32> = activation::softmax(slice, 0).into_data().to_vec().unwrap();
-
+            
             let distribution = WeightedIndex::new(&probs[..probs.len() - 1]).unwrap();
-
+            
             let prediction = distribution.sample(&mut rng) as usize;
+           
+            print!("{}", tokenizer.decode(&[prediction]));
+            io::stdout().flush().unwrap();
+            
+            
             toks.push(prediction);
+        
+            
         }
+        println!("");
 
         toks
     }
@@ -105,7 +122,6 @@ impl<B: Backend> GPTModel<B> {
 pub struct SingleHeadModelConfig {
     pub n_embd: usize,
     pub head_size: usize,
-
 }
 
 #[derive(Debug, Module)]
@@ -339,7 +355,7 @@ mod tests {
             block_size: 64,
         }
         .init::<NdArray>(&Default::default());
-        let generated = bm.generate(toks, 100);
+        let generated = bm.generate(toks, 10, 100, &tokenizer);
 
         println!("generated: {:?}", tokenizer.decode(&generated));
     }

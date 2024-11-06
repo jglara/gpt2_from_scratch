@@ -180,7 +180,7 @@ mod tests {
         };
 
         let bm = train(&config, train_data, test_data);
-        let generated = bm.generate(vec![0usize], 100);
+        let generated = bm.generate(vec![0usize], 10, 100, &tokenizer);
 
         println!("generated: {:?}", tokenizer.decode(&generated));
     }
