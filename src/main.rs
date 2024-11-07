@@ -5,34 +5,60 @@ use burn::backend::Wgpu;
 use burn::backend::{ndarray::NdArrayDevice, Autodiff, NdArray};
 use burn::module::Module;
 use burn::optim::AdamWConfig;
-use burn::prelude::Backend;
 use burn::record::CompactRecorder;
+
+use burn::tensor::backend::AutodiffBackend;
+use gpt2_from_scratch::learner::train;
 use gpt2_from_scratch::learner::TrainingConfig;
 use gpt2_from_scratch::model::{GPTModel, GPTModelConfig};
 use gpt2_from_scratch::tokenizer::{CharTokenizer, Tokenizer};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use twelf::{config, Layer};
 
-#[derive(Parser)]
+#[derive(Parser, Default)]
 struct Cli {
-    #[arg(short, long)]
+    #[clap(short, long, help = "Use GPU for training")]
     gpu: bool,
 
-    #[arg(short, long)]
+    /// Train the model
+    #[clap(
+        short,
+        long,
+        help = "Train the model. If this is not set, the model will be loaded from the model directory"
+    )]
     train: Option<String>,
 
-    #[arg(short, long)]
+    /// Model directory
+    #[clap(
+        short,
+        long,
+        default_value = "./model/",
+        help = "Directory to save the model and the artifacts"
+    )]
     model: String,
 
-    #[arg(long)]
+    /// Config file
+    #[clap(
+        long,
+        default_value = "./config.yaml",
+        help = "Path to the config file with hyperparameters of the model architecture"
+    )]
     config: String,
 
-    #[arg(long)]
+    /// Generate text
+    #[clap(
+        long,
+        help = "Generate a number of tokens"
+    )]
     generate: Option<usize>,
 
-    #[arg(long)]
+    /// Context for the generation
+    #[clap(
+        long,
+        help = "Context for the generation"
+    )]
     context: Option<String>,
 }
 
@@ -48,7 +74,7 @@ struct Conf {
     n_layers: usize,
 }
 
-fn main_with_backend<B: Backend>(
+fn train_and_generate<B: AutodiffBackend>(
     cli: &Cli,
     tokenizer: &CharTokenizer,
     train_config: &TrainingConfig,
@@ -56,18 +82,17 @@ fn main_with_backend<B: Backend>(
 ) -> Result<()> {
     let bm: GPTModel<_> = cli.train.as_ref().map_or_else(
         || {
-            train_config.model.init::<B>(&device).load_file(
-                &format!("{}/model", cli.model),
-                &CompactRecorder::new(),
-                &device,
-            )
-        },
-        |path| {
             train_config
                 .model
                 .init::<B>(&device)
-                .load_file(&path, &CompactRecorder::new(), &device)
+                .load_file(
+                    &format!("{}/model", cli.model),
+                    &CompactRecorder::new(),
+                    &device,
+                )
+                .with_context(|| format!("failed to load model from {}/model", cli.model))
         },
+        |path| Ok(train::<B>(&cli.model, &train_config, path, device.clone())),
     )?;
 
     if let Some(generate) = cli.generate {
@@ -106,11 +131,11 @@ fn main() -> Result<()> {
     if cli.gpu {
         type MyBackend = Autodiff<Wgpu>;
         let device = WgpuDevice::default();
-        main_with_backend::<MyBackend>(&cli, &tokenizer, &train_config, device)?;
+        train_and_generate::<MyBackend>(&cli, &tokenizer, &train_config, device)?;
     } else {
         type MyBackend = Autodiff<NdArray>;
         let device = NdArrayDevice::default();
-        main_with_backend::<MyBackend>(&cli, &tokenizer, &train_config, device)?;
+        train_and_generate::<MyBackend>(&cli, &tokenizer, &train_config, device)?;
     }
 
     Ok(())
