@@ -58,6 +58,10 @@ impl<B: Backend> GPTModel<B> {
         logits
     }
 
+    // loss function for training (CrossEntropyLoss)
+    //
+    // input: logits [b,t,vocab_size] target: [b,t]
+    // output: [1]
     pub fn loss(&self, logits: Tensor<B, 3>, targets: Tensor<B, 2, Int>) -> Tensor<B, 1> {
         let [b, t, c] = logits.dims();
 
@@ -71,6 +75,8 @@ impl<B: Backend> GPTModel<B> {
         loss
     }
 
+    // Generation of tokens using the given context and model
+    // max_tokens: number of tokens to generate
     pub fn generate(
         &self,
         context: Vec<usize>,
@@ -121,14 +127,15 @@ impl<B: Backend> GPTModel<B> {
 }
 
 ///// Single Head Attention Model
-///
-
+/// 
 #[derive(Config, Debug)]
 pub struct SingleHeadModelConfig {
     pub n_embd: usize,
     pub head_size: usize,
 }
 
+// Single Head Attention Model
+// https://www.youtube.com/watch?v=kCc8FmEb1nY&t=3720s
 #[derive(Debug, Module)]
 pub struct SingleHeadModel<B: Backend> {
     pub key: Linear<B>,
@@ -137,6 +144,8 @@ pub struct SingleHeadModel<B: Backend> {
 }
 
 impl<B: Backend> SingleHeadModel<B> {
+    // input: [b,t,c]. b: batch size t: block_size (context size) c: head_size
+    // output: [b,t,c]
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
         let [_b, t, c] = input.dims();
         let k = self.key.forward(input.clone()); // [b,t,head_size]
@@ -145,7 +154,7 @@ impl<B: Backend> SingleHeadModel<B> {
         let wei = q.matmul(k.transpose()); // [b,t,head_size] @ [b,head_size,t] = [b,t,t]
         let wei = wei.div_scalar((c as f32).sqrt()); // normalize to keep variance and make softmax later work better
 
-        // triangular mask to avoid looking ahead
+        // triangular mask to avoid looking ahead. https://www.youtube.com/watch?v=kCc8FmEb1nY&t=2831s
         // [[1, 0, 0],
         //  [1, 1, 0],
         //  [1, 1, 1]]
@@ -178,7 +187,7 @@ impl SingleHeadModelConfig {
 }
 
 ////// Multi Head Attention Model
-///
+/// https://www.youtube.com/watch?v=kCc8FmEb1nY&t=4919s
 
 #[derive(Config, Debug)]
 pub struct MultiHeadModelConfig {
@@ -209,6 +218,8 @@ impl MultiHeadModelConfig {
 }
 
 impl<B: Backend> MultiHeadModel<B> {
+    // input: [b,t,c]. b: batch size t: block_size (context size) c: head_size
+    // output: [b,t,c]
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
         // Run n_heads single head models in parallel
         let outs = self
@@ -225,7 +236,7 @@ impl<B: Backend> MultiHeadModel<B> {
 
 ///// Positional Feeed Forward Model
 ///
-///
+/// https://www.youtube.com/watch?v=kCc8FmEb1nY&t=5065s
 #[derive(Config, Debug)]
 pub struct PositionalFeedForwardModelConfig {
     pub n_embd: usize,
@@ -236,7 +247,7 @@ pub struct PositionalFeedForwardModelConfig {
 #[derive(Debug, Module)]
 pub struct PositionalFeedForwardModel<B: Backend> {
     pub layer_1: Linear<B>,
-    pub act_1: Relu,
+    pub act_1: Relu, // could also be a Gelu activation, like in GPT2
     pub layer_2: Linear<B>,
     pub dropout: Dropout,
 }
@@ -253,6 +264,8 @@ impl PositionalFeedForwardModelConfig {
 }
 
 impl<B: Backend> PositionalFeedForwardModel<B> {
+    // input: [b,t,c]. b: batch size t: block_size (context size) c: head_size
+    // output: [b,t,c]
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
         let x = self.layer_1.forward(input.clone());
         let x = self.act_1.forward(x);

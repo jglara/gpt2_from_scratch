@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
+
 pub trait Tokenizer {
     fn encode(&self, text: &str) -> Vec<usize>;
     fn decode(&self, tokens: &[usize]) -> String;
     fn vocab_size(&self) -> usize;
 }
 
+/////////////////////////////////////////////////////////////////////////////////
+// Very simple char tokenizer
 pub struct CharTokenizer {
     vocab: HashMap<usize, char>,
     reversed_vocab: HashMap<char, usize>,
@@ -44,6 +47,7 @@ impl Tokenizer for CharTokenizer {
         self.vocab.len()
     }
 }
+
 
 #[cfg(test)]
 mod tests {

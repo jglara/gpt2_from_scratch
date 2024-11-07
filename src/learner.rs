@@ -64,6 +64,9 @@ impl<B: Backend> ValidStep<LLMDataSetBatch<B>, ClassificationOutput<B>> for GPTM
     }
 }
 
+// Train a GPT model, using the config provided
+// input_file: path to the file used for training
+// artifact_dir: path to the directory where model checkpoints will be saved
 pub fn train<B: AutodiffBackend>(
     artifact_dir: &str,
     config: &TrainingConfig,
