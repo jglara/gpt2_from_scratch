@@ -29,6 +29,9 @@ struct Cli {
 
     #[arg(long)]
     generate: Option<usize>,
+
+    #[arg(long)]
+    context: Option<String>,
 }
 
 #[config]
@@ -85,12 +88,10 @@ fn main() -> Result<()> {
         };
 
         if let Some(generate) = cli.generate {
-          
-                let _generated = bm.generate(vec![0usize], 32, generate, &tokenizer);
-
-               
-           
-           
+            let ctxt = cli
+                .context
+                .map_or_else(|| vec![0usize], |c| tokenizer.encode(c.as_str()));
+            let _generated = bm.generate(ctxt, 32, generate, &tokenizer);
         }
     } else {
         type MyBackend = Autodiff<NdArray>;
@@ -112,9 +113,12 @@ fn main() -> Result<()> {
         };
 
         if let Some(generate) = cli.generate {
-            let _generated = bm.generate(vec![0usize], 32, generate, &tokenizer);
 
-         
+            let ctxt = cli
+                .context
+                .map_or_else(|| vec![0usize], |c| tokenizer.encode(c.as_str()));
+            let _generated = bm.generate(ctxt, 32, generate, &tokenizer);
+
         }
     }
 

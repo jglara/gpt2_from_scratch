@@ -38,6 +38,10 @@ impl GPTModelConfig {
     }
 }
 
+// GPT Model
+// input: [b,t] b: batch size t: block_size (context size)
+// output: [b,t,vocab_size]
+// 
 impl<B: Backend> GPTModel<B> {
     pub fn forward(&self, input: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [_, t] = input.dims();
@@ -79,6 +83,7 @@ impl<B: Backend> GPTModel<B> {
 
         let mut toks = context.clone();
 
+        println!("{}", tokenizer.decode(&context));
         for _ in 0..max_tokens {
             
        
