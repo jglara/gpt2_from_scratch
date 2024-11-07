@@ -1,4 +1,4 @@
-steps: 500
+steps: 1000
 batch_size: 64
 n_ctxt: 64
 learning_rate: 0.0003
