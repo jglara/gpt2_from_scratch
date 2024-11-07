@@ -1,10 +1,12 @@
+use std::path::PathBuf;
+
 use burn::backend::wgpu::WgpuDevice;
 use burn::backend::Wgpu;
 use burn::backend::{ndarray::NdArrayDevice, Autodiff, NdArray};
 use burn::module::Module;
 use burn::optim::AdamWConfig;
+use burn::prelude::Backend;
 use burn::record::CompactRecorder;
-use gpt2_from_scratch::learner::train;
 use gpt2_from_scratch::learner::TrainingConfig;
 use gpt2_from_scratch::model::{GPTModel, GPTModelConfig};
 use gpt2_from_scratch::tokenizer::{CharTokenizer, Tokenizer};
@@ -46,11 +48,44 @@ struct Conf {
     n_layers: usize,
 }
 
+fn main_with_backend<B: Backend>(
+    cli: &Cli,
+    tokenizer: &CharTokenizer,
+    train_config: &TrainingConfig,
+    device: B::Device,
+) -> Result<()> {
+    let bm: GPTModel<_> = cli.train.as_ref().map_or_else(
+        || {
+            train_config.model.init::<B>(&device).load_file(
+                &format!("{}/model", cli.model),
+                &CompactRecorder::new(),
+                &device,
+            )
+        },
+        |path| {
+            train_config
+                .model
+                .init::<B>(&device)
+                .load_file(&path, &CompactRecorder::new(), &device)
+        },
+    )?;
+
+    if let Some(generate) = cli.generate {
+        let ctxt = cli
+            .context
+            .as_ref()
+            .map_or_else(|| vec![0usize], |c| tokenizer.encode(c.as_str()));
+        let _generated = bm.generate(ctxt, 32, generate, tokenizer);
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let tokenizer = CharTokenizer::new();
     let cli = Cli::parse();
 
-    let conf = Conf::with_layers(&[Layer::Yaml(cli.config.into())])?;
+    let conf = Conf::with_layers(&[Layer::Yaml(PathBuf::from(&cli.config))])?;
 
     let train_config = TrainingConfig {
         steps: conf.steps,
@@ -71,55 +106,11 @@ fn main() -> Result<()> {
     if cli.gpu {
         type MyBackend = Autodiff<Wgpu>;
         let device = WgpuDevice::default();
-
-        let bm: GPTModel<_> = if cli.train.is_some() {
-            train::<MyBackend>(
-                &format!("{}", cli.model),
-                &train_config,
-                &cli.train.unwrap(),
-                device.clone(),
-            )
-        } else {
-            train_config.model.init(&device).load_file(
-                &format!("{}/model", cli.model),
-                &CompactRecorder::new(),
-                &device,
-            )?
-        };
-
-        if let Some(generate) = cli.generate {
-            let ctxt = cli
-                .context
-                .map_or_else(|| vec![0usize], |c| tokenizer.encode(c.as_str()));
-            let _generated = bm.generate(ctxt, 32, generate, &tokenizer);
-        }
+        main_with_backend::<MyBackend>(&cli, &tokenizer, &train_config, device)?;
     } else {
         type MyBackend = Autodiff<NdArray>;
         let device = NdArrayDevice::default();
-
-        let bm: GPTModel<_> = if cli.train.is_some() {
-            train::<MyBackend>(
-                &format!("{}", cli.model),
-                &train_config,
-                &cli.train.unwrap(),
-                device,
-            )
-        } else {
-            train_config.model.init(&device).load_file(
-                &format!("{}/model", cli.model),
-                &CompactRecorder::new(),
-                &device,
-            )?
-        };
-
-        if let Some(generate) = cli.generate {
-
-            let ctxt = cli
-                .context
-                .map_or_else(|| vec![0usize], |c| tokenizer.encode(c.as_str()));
-            let _generated = bm.generate(ctxt, 32, generate, &tokenizer);
-
-        }
+        main_with_backend::<MyBackend>(&cli, &tokenizer, &train_config, device)?;
     }
 
     Ok(())
